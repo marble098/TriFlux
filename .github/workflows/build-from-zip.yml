@@ -1,13 +1,13 @@
-name: Build KernelSU Module from Zip
+name: Build and Repackage KernelSU Module
 
 on:
   push:
     branches: [ "main", "master" ]
-  workflow_dispatch: # امکان اجرای دستی
+  workflow_dispatch:
 
 jobs:
   build:
-    name: Unzip, Build and Package
+    name: Compile and Package
     runs-on: ubuntu-latest
 
     steps:
@@ -15,58 +15,46 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # ۲. پیدا کردن و استخراج فایل زیپ آپلود شده
-      - name: Extract Uploaded Zip
+      # ۲. پیدا کردن و استخراج فایل زیپ ماژول
+      - name: Extract Original Zip
         run: |
-          # پیدا کردن اولین فایل زیپ موجود در مخزن
-          ZIP_FILE=$(ls *.zip | head -n 1)
+          # پیدا کردن اولین فایل زیپ موجود در مسیر اصلی مخزن
+          ZIP_FILE=$(find . -maxdepth 1 -name "*.zip" | head -n 1)
           if [ -z "$ZIP_FILE" ]; then
             echo "خطا: هیچ فایل فشرده‌ای (zip) در مخزن پیدا نشد!"
             exit 1
           fi
+          
           echo "در حال استخراج فایل: $ZIP_FILE"
-          unzip -q "$ZIP_FILE" -d extracted_source/
+          # فایل‌ها در پوشه build_env استخراج می‌شوند تا با فایل‌های گیت‌هاب تداخل پیدا نکنند
+          unzip -q "$ZIP_FILE" -d build_env/
 
       # ۳. تنظیم مسیر NDK پیش‌فرض سرورهای گیت‌هاب
-      - name: Setup Android NDK Environment
+      - name: Setup Android NDK
         run: |
           echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> $GITHUB_ENV
 
-      # ۴. جستجوی هوشمند برای یافتن اسکریپت بیلد و اجرای آن
-      - name: Locate and Build Core Binaries
+      # ۴. ورود به پوشه src استخراج‌شده، اجرای بیلد و ساخت فایل‌های باینری
+      - name: Build Core Binaries
         run: |
-          # پیدا کردن مسیر دقیق src/build.sh بدون توجه به نام پوشه‌های داخل زیپ
-          BUILD_SCRIPT=$(find extracted_source -type f -name "build.sh" | grep "src/build.sh" | head -n 1)
-          if [ -z "$BUILD_SCRIPT" ]; then
-            echo "خطا: فایل src/build.sh در فایل زیپ استخراج شده پیدا نشد!"
-            exit 1
-          fi
-          
-          SRC_DIR=$(dirname "$BUILD_SCRIPT")
-          echo "پوشه src در این مسیر پیدا شد: $SRC_DIR"
-          
-          cd "$SRC_DIR"
+          cd build_env/src
           chmod +x build.sh
           ./build.sh all
 
-      # ۵. بسته‌بندی مجدد ماژول به شکل استاندارد برای نصب
-      - name: Repackage Module
+      # ۵. بسته‌بندی مجدد به عنوان ماژول استاندارد KernelSU
+      - name: Repackage KernelSU Module
         run: |
-          # بازگشت به روت اصلی ماژول (یک سطح بالاتر از src)
-          BUILD_SCRIPT=$(find extracted_source -type f -name "build.sh" | grep "src/build.sh" | head -n 1)
-          MODULE_ROOT=$(dirname $(dirname "$BUILD_SCRIPT"))
-          
-          cd "$MODULE_ROOT"
-          echo "در حال ساخت فایل زیپ نهایی از مسیر: $MODULE_ROOT"
-          
-          # ساخت فایل زیپ نهایی در فضای اصلی گیت‌هاب اکشن
-          zip -r $GITHUB_WORKSPACE/directpath-ready.zip . -x '.*' -x 'src/.build-*'
+          cd build_env
+          echo "در حال ساخت فایل زیپ نهایی..."
+          # از داخل پوشه استخراج شده زیپ می‌کنیم تا module.prop دقیقا در روت فایل زیپ باشد
+          # فایل‌های مخفی و پوشه‌های موقت بیلد (مثل src/.build-) حذف می‌شوند
+          zip -r ../DirectPath-KernelSU-Release.zip . -x '.*' -x 'src/.build-*'
 
-      # ۶. تحویل فایل نهایی و آماده در بخش Artifacts
+      # ۶. تحویل فایل نهایی و آماده نصب در بخش Artifacts
       - name: Upload to Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: DirectPath-Ready-To-Install
-          path: directpath-ready.zip
+          name: DirectPath-KernelSU-Module
+          path: DirectPath-KernelSU-Release.zip
           retention-days: 14
           
