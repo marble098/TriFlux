@@ -1,0 +1,72 @@
+name: Build KernelSU Module from Zip
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch: # امکان اجرای دستی
+
+jobs:
+  build:
+    name: Unzip, Build and Package
+    runs-on: ubuntu-latest
+
+    steps:
+      # ۱. دریافت کدهای مخزن (شامل فایل زیپی که آپلود کرده‌اید)
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # ۲. پیدا کردن و استخراج فایل زیپ آپلود شده
+      - name: Extract Uploaded Zip
+        run: |
+          # پیدا کردن اولین فایل زیپ موجود در مخزن
+          ZIP_FILE=$(ls *.zip | head -n 1)
+          if [ -z "$ZIP_FILE" ]; then
+            echo "خطا: هیچ فایل فشرده‌ای (zip) در مخزن پیدا نشد!"
+            exit 1
+          fi
+          echo "در حال استخراج فایل: $ZIP_FILE"
+          unzip -q "$ZIP_FILE" -d extracted_source/
+
+      # ۳. تنظیم مسیر NDK پیش‌فرض سرورهای گیت‌هاب
+      - name: Setup Android NDK Environment
+        run: |
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> $GITHUB_ENV
+
+      # ۴. جستجوی هوشمند برای یافتن اسکریپت بیلد و اجرای آن
+      - name: Locate and Build Core Binaries
+        run: |
+          # پیدا کردن مسیر دقیق src/build.sh بدون توجه به نام پوشه‌های داخل زیپ
+          BUILD_SCRIPT=$(find extracted_source -type f -name "build.sh" | grep "src/build.sh" | head -n 1)
+          if [ -z "$BUILD_SCRIPT" ]; then
+            echo "خطا: فایل src/build.sh در فایل زیپ استخراج شده پیدا نشد!"
+            exit 1
+          fi
+          
+          SRC_DIR=$(dirname "$BUILD_SCRIPT")
+          echo "پوشه src در این مسیر پیدا شد: $SRC_DIR"
+          
+          cd "$SRC_DIR"
+          chmod +x build.sh
+          ./build.sh all
+
+      # ۵. بسته‌بندی مجدد ماژول به شکل استاندارد برای نصب
+      - name: Repackage Module
+        run: |
+          # بازگشت به روت اصلی ماژول (یک سطح بالاتر از src)
+          BUILD_SCRIPT=$(find extracted_source -type f -name "build.sh" | grep "src/build.sh" | head -n 1)
+          MODULE_ROOT=$(dirname $(dirname "$BUILD_SCRIPT"))
+          
+          cd "$MODULE_ROOT"
+          echo "در حال ساخت فایل زیپ نهایی از مسیر: $MODULE_ROOT"
+          
+          # ساخت فایل زیپ نهایی در فضای اصلی گیت‌هاب اکشن
+          zip -r $GITHUB_WORKSPACE/directpath-ready.zip . -x '.*' -x 'src/.build-*'
+
+      # ۶. تحویل فایل نهایی و آماده در بخش Artifacts
+      - name: Upload to Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: DirectPath-Ready-To-Install
+          path: directpath-ready.zip
+          retention-days: 14
+          
